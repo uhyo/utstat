@@ -78,7 +78,7 @@
     };
 
     Builder.prototype.registerSite = function(sitedir, siteobj) {
-      var currentState, outdir, output;
+      var currentState, dependpath, outdir, output;
       this.siteobj = siteobj;
       output = siteobj.output;
       if (output == null) {
@@ -99,7 +99,45 @@
           return builder.renderFile(filepath, outdir, res + builder.config.extension, currentState, callback);
         }
       };
-      return this.directory(sitedir, outdir, currentState);
+      dependpath = path.join(sitedir, this.config.dependencies_file);
+
+      /*
+       * files: {filepath: mtime}
+       * depends: {from: [to]}
+       *
+       */
+      this.newtable = {};
+      return fs.readFile(dependpath, {
+        encoding: this.config.encoding
+      }, (function(_this) {
+        return function(err, data) {
+          var e;
+          if (err != null) {
+            _this.dependencies = {
+              files: {},
+              depends: {}
+            };
+          } else {
+            try {
+              _this.dependencies = JSON.parse(data);
+            } catch (_error) {
+              e = _error;
+              console.error("" + dependpath + " may be broken. Remove the file to build full site.");
+              throw e;
+            }
+          }
+          return _this.directory(sitedir, outdir, currentState, function() {
+            return fs.writeFile(dependpath, JSON.stringify(_this.dependencies), {
+              encoding: _this.config.encoding
+            }, function(err) {
+              if (err != null) {
+                console.error("Error writing " + dependpath);
+                throw err;
+              }
+            });
+          });
+        };
+      })(this));
     };
 
     Builder.prototype.directory = function(indir, outdir, currentState, callback) {
@@ -166,34 +204,86 @@
                 }
                 filename = files[index];
                 filepath = path.join(indir, filename);
-                return fs.stat(filepath, function(err, stat) {
+                return _this.isNew(filepath, function(state, isdir) {
                   var ext, func;
-                  if (err != null) {
+                  if (isdir) {
+                    _this.directory(filepath, path.join(outdir, filename), currentState, function() {
+                      return _onefile(index + 1);
+                    });
+                    return;
+                  }
+                  if (state === false) {
                     _onefile(index + 1);
                     return;
                   }
-                  if (stat.isDirectory()) {
-                    return _this.directory(filepath, path.join(outdir, filename), currentState, function() {
-                      return _onefile(index + 1);
-                    });
+                  ext = path.extname(filepath);
+                  func = currentState.renderer[ext];
+                  if (func == null) {
+                    return _onefile(index + 1);
                   } else {
-                    ext = path.extname(filepath);
-                    func = currentState.renderer[ext];
-                    if (func == null) {
-                      return _onefile(index + 1);
-                    } else {
-                      return func(_this, filepath, outdir, currentState, function() {
-                        return process.nextTick(function() {
-                          return _onefile(index + 1);
-                        });
+                    return func(_this, filepath, outdir, currentState, function() {
+                      return process.nextTick(function() {
+                        return _onefile(index + 1);
                       });
-                    }
+                    });
                   }
                 });
               };
               return _onefile(0);
             });
           };
+        };
+      })(this));
+    };
+
+    Builder.prototype.isNew = function(filepath, callback) {
+      if (this.newtable[filepath] != null) {
+        callback(this.newtable[filepath]);
+        return;
+      }
+      return fs.stat(filepath, (function(_this) {
+        return function(err, stat) {
+          var files, some, _check;
+          if (err != null) {
+            _this.newtable[filepath] = false;
+            callback(false);
+            return;
+          }
+          if (stat.isDirectory()) {
+            callback(true, true);
+            return;
+          }
+          if ((_this.dependencies.files[filepath] == null) || _this.dependencies.files[filepath] < stat.mtime.getTime()) {
+            _this.dependencies.files[filepath] = stat.mtime.getTime();
+            _this.newtable[filepath] = true;
+            callback(true);
+            return;
+          }
+          _this.newtable[filepath] = false;
+          files = _this.dependencies.depends[filepath];
+          if (!Array.isArray(files)) {
+            callback(false);
+            return;
+          }
+          some = false;
+          _check = function(index) {
+            var dfilepath;
+            if (index >= files.length) {
+              if (some) {
+                _this.newtable[filepath] = true;
+                callback(true);
+              } else {
+                callback(false);
+              }
+              return;
+            }
+            dfilepath = files[index];
+            return _this.isNew(dfilepath, function(state) {
+              some || (some = state);
+              return _check(index + 1);
+            });
+          };
+          return _check(0);
         };
       })(this));
     };

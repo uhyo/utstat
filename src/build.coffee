@@ -70,7 +70,38 @@ class Builder
             ".jade":(builder,filepath,outdir,currentState,callback)->
                 res=path.basename filepath,".jade"
                 builder.renderFile filepath,outdir,res+builder.config.extension,currentState,callback
-        @directory sitedir,outdir,currentState
+        # 依存関係ファイルをチェックする
+        dependpath=path.join sitedir,@config.dependencies_file
+        # @dependencies
+        ###
+        # files: {filepath: mtime}
+        # depends: {from: [to]}
+        #
+        ###
+        # このファイルが新しいか古いか確かめる
+        @newtable={} # {filepath: boolean}
+        fs.readFile dependpath,{
+            encoding:@config.encoding
+        },(err,data)=>
+            if err?
+                # ないから新規に作成
+                @dependencies=
+                    files:{}
+                    depends:{}
+            else
+                try
+                    @dependencies=JSON.parse data
+                catch e
+                    console.error "#{dependpath} may be broken. Remove the file to build full site."
+                    throw e
+            @directory sitedir,outdir,currentState,=>
+                # 終了したら依存関係を保存
+                fs.writeFile dependpath,JSON.stringify(@dependencies),{
+                    encoding:@config.encoding
+                },(err)=>
+                    if err?
+                        console.error "Error writing #{dependpath}"
+                        throw err
 
     # ディレクトリをビルドする
     directory:(indir,outdir,currentState,callback)->
@@ -122,28 +153,76 @@ class Builder
                         filename=files[index]
                         # 全ファイルを走査する!!!!!!!
                         filepath=path.join indir,filename
-                        fs.stat filepath,(err,stat)=>
-                            if err?
-                                # 無視して次へ
-                                _onefile index+1
-                                return
-                            if stat.isDirectory()
-                                # 中を走査する
+                        @isNew filepath,(state,isdir)=>
+                            if isdir
+                                # ディレクトリは中を走査する
                                 @directory filepath,path.join(outdir,filename),currentState,->
                                     _onefile index+1
+                                return
+                            if state==false
+                                # このファイルは新しくない
+                                _onefile index+1
+                                return
+
+                            # ファイルをアレする
+                            ext=path.extname filepath
+                            func=currentState.renderer[ext]
+                            unless func?
+                                # 対応するレンダラはない
+                                _onefile index+1
                             else
-                                # ファイルをアレする
-                                ext=path.extname filepath
-                                func=currentState.renderer[ext]
-                                unless func?
-                                    # 対応するレンダラはない
-                                    _onefile index+1
-                                else
-                                    # レンダリングする
-                                    func this,filepath,outdir,currentState,->
-                                        process.nextTick ->
-                                            _onefile index+1
+                                # レンダリングする
+                                func this,filepath,outdir,currentState,->
+                                    process.nextTick ->
+                                        _onefile index+1
                     _onefile 0
+    # このファイルが更新されているかどうか
+    isNew:(filepath,callback)->
+        if @newtable[filepath]?
+            # trueかfalse
+            callback @newtable[filepath]
+            return
+        fs.stat filepath,(err,stat)=>
+            if err?
+                # なにこれ
+                @newtable[filepath]=false
+                callback false
+                return
+            if stat.isDirectory()
+                # ディレクトリは常に見よう
+                callback true,true
+                return
+            # 比べる
+            if !@dependencies.files[filepath]? || @dependencies.files[filepath]<stat.mtime.getTime()
+                @dependencies.files[filepath]=stat.mtime.getTime()
+                @newtable[filepath]=true
+                callback true
+                return
+            # このファイルは変更されていない。依存関係を調べる
+            @newtable[filepath]=false #無限ループ防止に一旦false
+            files=@dependencies.depends[filepath]
+            unless Array.isArray files
+                # 依存関係なし
+                callback false
+                return
+            some=false
+            _check=(index)=>
+                if index>=files.length
+                    # ないね
+                    if some
+                        # 依存先が新しくなっていたりした
+                        @newtable[filepath]=true
+                        callback true
+                    else
+                        callback false
+                    return
+                dfilepath=files[index]
+                @isNew dfilepath,(state)->
+                    some ||= state
+                    _check index+1
+            _check 0
+
+
     # ひとつrenderする
     renderFile:(filepath,outdir,outname,currentState,local,callback)->
         if !callback? && "function"==typeof local
