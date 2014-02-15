@@ -88,10 +88,17 @@
       currentState = {};
 
       /*
-       * renderer: テンプレートの関数
-       *
+       * frameRenderer: テンプレートの関数
+       * renderer: 拡張子ごとのやつ
        *
        */
+      currentState.renderer = {
+        ".jade": function(builder, filepath, outdir, currentState, callback) {
+          var res;
+          res = path.basename(filepath, ".jade");
+          return builder.renderFile(filepath, outdir, res + builder.config.extension, currentState, callback);
+        }
+      };
       return this.directory(sitedir, outdir, currentState);
     };
 
@@ -125,7 +132,7 @@
                       console.error("Error processing " + indexfile);
                       throw err;
                     }
-                    currentState.renderer = jade.compile(data, {
+                    currentState.frameRenderer = jade.compile(data, {
                       filename: templatefile,
                       pretty: true,
                       self: false,
@@ -134,6 +141,8 @@
                     });
                     return nextStep();
                   });
+                } else {
+                  nextStep();
                 }
               }
             } else {
@@ -148,7 +157,7 @@
               }
               index = 0;
               _onefile = function(index) {
-                var filename, filepath, outpath, result;
+                var filename, filepath;
                 if (index >= files.length) {
                   if (callback != null) {
                     callback();
@@ -157,56 +166,72 @@
                 }
                 filename = files[index];
                 filepath = path.join(indir, filename);
-                result = filename.match(/^(.*)\.jade$/);
-                if (result != null) {
-                  outpath = path.join(outdir, "" + result[1] + "." + _this.config.extension);
-                  return jade.renderFile(filepath, {
-                    filename: filepath,
-                    pretty: true
-                  }, function(err, html) {
-                    var renderresult;
-                    if (err != null) {
-                      console.error("Error rendering " + filepath);
-                      throw err;
-                    }
-                    if ("function" !== typeof currentState.renderer) {
-                      console.error("Error processing " + filepath);
-                      throw new Error("No renderer is set.");
-                    }
-                    renderresult = currentState.renderer({
-                      content: html
+                return fs.stat(filepath, function(err, stat) {
+                  var ext, func;
+                  if (err != null) {
+                    _onefile(index + 1);
+                    return;
+                  }
+                  if (stat.isDirectory()) {
+                    return _this.directory(filepath, path.join(outdir, filename), currentState, function() {
+                      return _onefile(index + 1);
                     });
-                    return fs.writeFile(outpath, renderresult, {
-                      encoding: _this.config.encoding
-                    }, function(err) {
-                      if (err != null) {
-                        console.error("Error processing " + filepath);
-                        throw err;
-                      }
-                      return process.nextTick(function() {
-                        return _onefile(index + 1);
-                      });
-                    });
-                  });
-                } else {
-                  return fs.stat(filename, function(err, stat) {
-                    if (err != null) {
+                  } else {
+                    ext = path.extname(filepath);
+                    func = currentState.renderer[ext];
+                    if (func == null) {
                       return _onefile(index + 1);
                     } else {
-                      if (stat.isDirectory()) {
-                        return _this.directory(filepath, path.join(outdir, filename), currentState, function() {
+                      return func(_this, filepath, outdir, currentState, function() {
+                        return process.nextTick(function() {
                           return _onefile(index + 1);
                         });
-                      } else {
-                        return _onefile(index + 1);
-                      }
+                      });
                     }
-                  });
-                }
+                  }
+                });
               };
               return _onefile(0);
             });
           };
+        };
+      })(this));
+    };
+
+    Builder.prototype.renderFile = function(filepath, outdir, outname, currentState, local, callback) {
+      var dir, opt, outpath;
+      if ((callback == null) && "function" === typeof local) {
+        callback = local;
+        local = {};
+      }
+      dir = path.dirname(filepath);
+      outpath = path.join(outdir, outname);
+      opt = Object.create(local);
+      opt.filename = filepath;
+      opt.pretty = true;
+      return jade.renderFile(filepath, opt, (function(_this) {
+        return function(err, html) {
+          var renderresult;
+          if (err != null) {
+            console.error("Error rendering " + filepath);
+            throw err;
+          }
+          if ("function" !== typeof (currentState != null ? currentState.frameRenderer : void 0)) {
+            console.error("Error processing " + filepath);
+            throw new Error("No renderer is set.");
+          }
+          renderresult = currentState.frameRenderer({
+            content: html
+          });
+          return fs.writeFile(outpath, renderresult, {
+            encoding: _this.config.encoding
+          }, function(err) {
+            if (err != null) {
+              console.error("Error processing " + filepath);
+              throw err;
+            }
+            return callback();
+          });
         };
       })(this));
     };

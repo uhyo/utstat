@@ -62,10 +62,14 @@ class Builder
         # 現在の状態を作る
         currentState={}
         ###
-        # renderer: テンプレートの関数
-        #
+        # frameRenderer: テンプレートの関数
+        # renderer: 拡張子ごとのやつ
         #
         ###
+        currentState.renderer=
+            ".jade":(builder,filepath,outdir,currentState,callback)->
+                res=path.basename filepath,".jade"
+                builder.renderFile filepath,outdir,res+builder.config.extension,currentState,callback
         @directory sitedir,outdir,currentState
 
     # ディレクトリをビルドする
@@ -91,7 +95,7 @@ class Builder
                                     console.error "Error processing #{indexfile}"
                                     throw err
 
-                                currentState.renderer=jade.compile data,{
+                                currentState.frameRenderer=jade.compile data,{
                                     filename:templatefile
                                     pretty:true
                                     self:false
@@ -99,6 +103,8 @@ class Builder
                                     compileDebug:false
                                 }
                                 do nextStep
+                        else
+                            do nextStep
                 else
                     do nextStep
             # indexを読み終わったのでディレクトリを列挙する
@@ -116,52 +122,61 @@ class Builder
                         filename=files[index]
                         # 全ファイルを走査する!!!!!!!
                         filepath=path.join indir,filename
-                        result=filename.match /^(.*)\.jade$/
-                        if result?
-                            # このファイルは変換する
-                            outpath=path.join outdir,"#{result[1]}.#{@config.extension}"
-                            jade.renderFile filepath,{
-                                filename:filepath
-                                pretty:true
-                            },(err,html)=>
-                                if err?
-                                    console.error "Error rendering #{filepath}"
-                                    throw err
-                                # マスターに突っ込む
-                                if "function"!=typeof currentState.renderer
-                                    console.error "Error processing #{filepath}"
-                                    throw new Error "No renderer is set."
-                                renderresult=currentState.renderer {
-                                    content:html
-                                }
-                                # 書き込む
-
-                                fs.writeFile outpath,renderresult,{
-                                    encoding:@config.encoding
-                                },(err)->
-                                    if err?
-                                        console.error "Error processing #{filepath}"
-                                        throw err
-                                    # 次へ
-                                    process.nextTick ->
-                                        _onefile index+1
-                        else
-                            # 関係ないファイルか?
-                            fs.stat filename,(err,stat)=>
-                                if err?
-                                    # 無視して次へ
+                        fs.stat filepath,(err,stat)=>
+                            if err?
+                                # 無視して次へ
+                                _onefile index+1
+                                return
+                            if stat.isDirectory()
+                                # 中を走査する
+                                @directory filepath,path.join(outdir,filename),currentState,->
+                                    _onefile index+1
+                            else
+                                # ファイルをアレする
+                                ext=path.extname filepath
+                                func=currentState.renderer[ext]
+                                unless func?
+                                    # 対応するレンダラはない
                                     _onefile index+1
                                 else
-                                    if stat.isDirectory()
-                                        # 中を走査する
-                                        @directory filepath,path.join(outdir,filename),currentState,->
+                                    # レンダリングする
+                                    func this,filepath,outdir,currentState,->
+                                        process.nextTick ->
                                             _onefile index+1
-                                    else
-                                        _onefile index+1
                     _onefile 0
+    # ひとつrenderする
+    renderFile:(filepath,outdir,outname,currentState,local,callback)->
+        if !callback? && "function"==typeof local
+            callback=local
+            local={}
+        dir=path.dirname filepath
+        outpath=path.join outdir,outname
+        opt=Object.create local
+        opt.filename=filepath
+        opt.pretty=true
+
+        jade.renderFile filepath,opt,(err,html)=>
+            if err?
+                console.error "Error rendering #{filepath}"
+                throw err
+            # マスターに突っ込む
+            if "function"!=typeof currentState?.frameRenderer
+                console.error "Error processing #{filepath}"
+                throw new Error "No renderer is set."
+            renderresult=currentState.frameRenderer {
+                content:html
+            }
+            # 書き込む
+            fs.writeFile outpath,renderresult,{
+                encoding:@config.encoding
+            },(err)->
+                if err?
+                    console.error "Error processing #{filepath}"
+                    throw err
+                # 次へ
+                callback()
 
 
-        
 
 
 
