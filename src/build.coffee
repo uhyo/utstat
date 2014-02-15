@@ -54,11 +54,12 @@ class Builder
 
     # サイト情報をゲットして走査開始するぞ!!!!!!!!!!!!!!!!
     registerSite:(sitedir,siteobj)->
+        @sitedir=sitedir
         @siteobj=siteobj
         output=siteobj.output
         unless output?
             throw new Error "No output field."
-        outdir=path.join sitedir,output
+        @outdir=path.resolve sitedir,output
         # 現在の状態を作る
         currentState={}
         ###
@@ -94,7 +95,7 @@ class Builder
                 catch e
                     console.error "#{dependpath} may be broken. Remove the file to build full site."
                     throw e
-            @directory sitedir,outdir,currentState,=>
+            @directory sitedir,".",currentState,=>
                 # 終了したら依存関係を保存
                 fs.writeFile dependpath,JSON.stringify(@dependencies),{
                     encoding:@config.encoding
@@ -104,8 +105,9 @@ class Builder
                         throw err
 
     # ディレクトリをビルドする
-    directory:(indir,outdir,currentState,callback)->
-        @ensureDir outdir,(err)=>
+    directory:(indir,relativedir,currentState,callback)->
+        odir=path.join @outdir,relativedir
+        @ensureDir odir,(err)=>
             if err?
                 throw err
             # まずindexファイルを読んでみる
@@ -153,10 +155,11 @@ class Builder
                         filename=files[index]
                         # 全ファイルを走査する!!!!!!!
                         filepath=path.join indir,filename
-                        @isNew filepath,(state,isdir)=>
+                        relpath=path.join relativedir,filename
+                        @isNew filepath,relpath,(state,isdir)=>
                             if isdir
                                 # ディレクトリは中を走査する
-                                @directory filepath,path.join(outdir,filename),currentState,->
+                                @directory filepath,relpath,currentState,->
                                     _onefile index+1
                                 return
                             if state==false
@@ -172,20 +175,20 @@ class Builder
                                 _onefile index+1
                             else
                                 # レンダリングする
-                                func this,filepath,outdir,currentState,->
+                                func this,filepath,odir,currentState,->
                                     process.nextTick ->
                                         _onefile index+1
                     _onefile 0
     # このファイルが更新されているかどうか
-    isNew:(filepath,callback)->
-        if @newtable[filepath]?
+    isNew:(filepath,relpath,callback)->
+        if @newtable[relpath]?
             # trueかfalse
-            callback @newtable[filepath]
+            callback @newtable[relpath]
             return
         fs.stat filepath,(err,stat)=>
             if err?
                 # なにこれ
-                @newtable[filepath]=false
+                @newtable[relpath]=false
                 callback false
                 return
             if stat.isDirectory()
@@ -193,14 +196,14 @@ class Builder
                 callback true,true
                 return
             # 比べる
-            if !@dependencies.files[filepath]? || @dependencies.files[filepath]<stat.mtime.getTime()
-                @dependencies.files[filepath]=stat.mtime.getTime()
-                @newtable[filepath]=true
+            if !@dependencies.files[relpath]? || @dependencies.files[relpath]<stat.mtime.getTime()
+                @dependencies.files[relpath]=stat.mtime.getTime()
+                @newtable[relpath]=true
                 callback true
                 return
             # このファイルは変更されていない。依存関係を調べる
-            @newtable[filepath]=false #無限ループ防止に一旦false
-            files=@dependencies.depends[filepath]
+            @newtable[relpath]=false #無限ループ防止に一旦false
+            files=@dependencies.depends[relpath]
             unless Array.isArray files
                 # 依存関係なし
                 callback false
@@ -211,13 +214,14 @@ class Builder
                     # ないね
                     if some
                         # 依存先が新しくなっていたりした
-                        @newtable[filepath]=true
+                        @newtable[relpath]=true
                         callback true
                     else
                         callback false
                     return
                 dfilepath=files[index]
-                @isNew dfilepath,(state)->
+                realpath=path.resolve @sitedir,dfilepath
+                @isNew realpath,dfilepath,(state)->
                     some ||= state
                     _check index+1
             _check 0

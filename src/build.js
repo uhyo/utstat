@@ -78,13 +78,14 @@
     };
 
     Builder.prototype.registerSite = function(sitedir, siteobj) {
-      var currentState, dependpath, outdir, output;
+      var currentState, dependpath, output;
+      this.sitedir = sitedir;
       this.siteobj = siteobj;
       output = siteobj.output;
       if (output == null) {
         throw new Error("No output field.");
       }
-      outdir = path.join(sitedir, output);
+      this.outdir = path.resolve(sitedir, output);
       currentState = {};
 
       /*
@@ -126,7 +127,7 @@
               throw e;
             }
           }
-          return _this.directory(sitedir, outdir, currentState, function() {
+          return _this.directory(sitedir, ".", currentState, function() {
             return fs.writeFile(dependpath, JSON.stringify(_this.dependencies), {
               encoding: _this.config.encoding
             }, function(err) {
@@ -140,8 +141,10 @@
       })(this));
     };
 
-    Builder.prototype.directory = function(indir, outdir, currentState, callback) {
-      return this.ensureDir(outdir, (function(_this) {
+    Builder.prototype.directory = function(indir, relativedir, currentState, callback) {
+      var odir;
+      odir = path.join(this.outdir, relativedir);
+      return this.ensureDir(odir, (function(_this) {
         return function(err) {
           var indexfile, nextStep;
           if (err != null) {
@@ -195,7 +198,7 @@
               }
               index = 0;
               _onefile = function(index) {
-                var filename, filepath;
+                var filename, filepath, relpath;
                 if (index >= files.length) {
                   if (callback != null) {
                     callback();
@@ -204,10 +207,11 @@
                 }
                 filename = files[index];
                 filepath = path.join(indir, filename);
-                return _this.isNew(filepath, function(state, isdir) {
+                relpath = path.join(relativedir, filename);
+                return _this.isNew(filepath, relpath, function(state, isdir) {
                   var ext, func;
                   if (isdir) {
-                    _this.directory(filepath, path.join(outdir, filename), currentState, function() {
+                    _this.directory(filepath, relpath, currentState, function() {
                       return _onefile(index + 1);
                     });
                     return;
@@ -221,7 +225,7 @@
                   if (func == null) {
                     return _onefile(index + 1);
                   } else {
-                    return func(_this, filepath, outdir, currentState, function() {
+                    return func(_this, filepath, odir, currentState, function() {
                       return process.nextTick(function() {
                         return _onefile(index + 1);
                       });
@@ -236,16 +240,16 @@
       })(this));
     };
 
-    Builder.prototype.isNew = function(filepath, callback) {
-      if (this.newtable[filepath] != null) {
-        callback(this.newtable[filepath]);
+    Builder.prototype.isNew = function(filepath, relpath, callback) {
+      if (this.newtable[relpath] != null) {
+        callback(this.newtable[relpath]);
         return;
       }
       return fs.stat(filepath, (function(_this) {
         return function(err, stat) {
           var files, some, _check;
           if (err != null) {
-            _this.newtable[filepath] = false;
+            _this.newtable[relpath] = false;
             callback(false);
             return;
           }
@@ -253,24 +257,24 @@
             callback(true, true);
             return;
           }
-          if ((_this.dependencies.files[filepath] == null) || _this.dependencies.files[filepath] < stat.mtime.getTime()) {
-            _this.dependencies.files[filepath] = stat.mtime.getTime();
-            _this.newtable[filepath] = true;
+          if ((_this.dependencies.files[relpath] == null) || _this.dependencies.files[relpath] < stat.mtime.getTime()) {
+            _this.dependencies.files[relpath] = stat.mtime.getTime();
+            _this.newtable[relpath] = true;
             callback(true);
             return;
           }
-          _this.newtable[filepath] = false;
-          files = _this.dependencies.depends[filepath];
+          _this.newtable[relpath] = false;
+          files = _this.dependencies.depends[relpath];
           if (!Array.isArray(files)) {
             callback(false);
             return;
           }
           some = false;
           _check = function(index) {
-            var dfilepath;
+            var dfilepath, realpath;
             if (index >= files.length) {
               if (some) {
-                _this.newtable[filepath] = true;
+                _this.newtable[relpath] = true;
                 callback(true);
               } else {
                 callback(false);
@@ -278,7 +282,8 @@
               return;
             }
             dfilepath = files[index];
-            return _this.isNew(dfilepath, function(state) {
+            realpath = path.resolve(_this.sitedir, dfilepath);
+            return _this.isNew(realpath, dfilepath, function(state) {
               some || (some = state);
               return _check(index + 1);
             });
