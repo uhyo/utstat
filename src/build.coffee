@@ -64,13 +64,17 @@ class Builder
         currentState={}
         ###
         # frameRenderer: テンプレートの関数
-        # renderer: 拡張子ごとのやつ
+        # renderer: レンダリングする関数
         #
         ###
-        currentState.renderer=
-            ".jade":(builder,filepath,outdir,currentState,callback)->
+        currentState.renderer=(filepath,outdir,currentState,callback)=>
+            ext=path.extname filepath
+            if ext==".jade"
                 res=path.basename filepath,".jade"
-                builder.renderFile filepath,outdir,res+builder.config.extension,currentState,callback
+                @renderFile filepath,path.join(outdir,res+@config.extension),currentState,callback
+            else
+                # 何もしない
+                callback()
         # 依存関係ファイルをチェックする
         dependpath=path.join sitedir,@config.dependencies_file
         # @dependencies
@@ -135,13 +139,20 @@ class Builder
                                     debug:false
                                     compileDebug:false
                                 }
-                                do nextStep
+                                nextStep indexobj
                         else
-                            do nextStep
+                            nextStep indexobj
                 else
-                    do nextStep
+                    nextStep null
+            # レンダラも読み込んだりして
+            nextStep=(indexobj)=>
+                if indexobj?.renderer
+                    rendererfile=require path.join indir,indexobj.renderer
+                    rendererobj=rendererfile.getRenderer this
+                    currentState.renderer=rendererobj.render
+                do nextStep2
             # indexを読み終わったのでディレクトリを列挙する
-            nextStep= =>
+            nextStep2= =>
                 fs.readdir indir,(err,files)=>
                     if err
                         throw err
@@ -168,16 +179,10 @@ class Builder
                                 return
 
                             # ファイルをアレする
-                            ext=path.extname filepath
-                            func=currentState.renderer[ext]
-                            unless func?
-                                # 対応するレンダラはない
-                                _onefile index+1
-                            else
-                                # レンダリングする
-                                func this,filepath,odir,currentState,->
-                                    process.nextTick ->
-                                        _onefile index+1
+                            # レンダリングする
+                            currentState.renderer filepath,odir,currentState,->
+                                process.nextTick ->
+                                    _onefile index+1
                     _onefile 0
     # このファイルが更新されているかどうか
     isNew:(filepath,relpath,callback)->
@@ -228,12 +233,11 @@ class Builder
 
 
     # ひとつrenderする
-    renderFile:(filepath,outdir,outname,currentState,local,callback)->
+    renderFile:(filepath,outpath,currentState,local,callback)->
         if !callback? && "function"==typeof local
             callback=local
             local={}
         dir=path.dirname filepath
-        outpath=path.join outdir,outname
         opt=Object.create local
         opt.filename=filepath
         opt.pretty=true

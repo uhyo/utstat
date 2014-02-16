@@ -1,3 +1,4 @@
 {
-	"template":"../templates/main.jade"
+	"template":"../templates/main.jade",
+	"renderer":"renderer.js"
 }

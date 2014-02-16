@@ -90,16 +90,21 @@
 
       /*
        * frameRenderer: テンプレートの関数
-       * renderer: 拡張子ごとのやつ
+       * renderer: レンダリングする関数
        *
        */
-      currentState.renderer = {
-        ".jade": function(builder, filepath, outdir, currentState, callback) {
-          var res;
-          res = path.basename(filepath, ".jade");
-          return builder.renderFile(filepath, outdir, res + builder.config.extension, currentState, callback);
-        }
-      };
+      currentState.renderer = (function(_this) {
+        return function(filepath, outdir, currentState, callback) {
+          var ext, res;
+          ext = path.extname(filepath);
+          if (ext === ".jade") {
+            res = path.basename(filepath, ".jade");
+            return _this.renderFile(filepath, path.join(outdir, res + _this.config.extension), currentState, callback);
+          } else {
+            return callback();
+          }
+        };
+      })(this);
       dependpath = path.join(sitedir, this.config.dependencies_file);
 
       /*
@@ -146,7 +151,7 @@
       odir = path.join(this.outdir, relativedir);
       return this.ensureDir(odir, (function(_this) {
         return function(err) {
-          var indexfile, nextStep;
+          var indexfile, nextStep, nextStep2;
           if (err != null) {
             throw err;
           }
@@ -180,17 +185,26 @@
                       debug: false,
                       compileDebug: false
                     });
-                    return nextStep();
+                    return nextStep(indexobj);
                   });
                 } else {
-                  nextStep();
+                  nextStep(indexobj);
                 }
               }
             } else {
-              return nextStep();
+              return nextStep(null);
             }
           });
-          return nextStep = function() {
+          nextStep = function(indexobj) {
+            var rendererfile, rendererobj;
+            if (indexobj != null ? indexobj.renderer : void 0) {
+              rendererfile = require(path.join(indir, indexobj.renderer));
+              rendererobj = rendererfile.getRenderer(_this);
+              currentState.renderer = rendererobj.render;
+            }
+            return nextStep2();
+          };
+          return nextStep2 = function() {
             return fs.readdir(indir, function(err, files) {
               var index, _onefile;
               if (err) {
@@ -209,7 +223,6 @@
                 filepath = path.join(indir, filename);
                 relpath = path.join(relativedir, filename);
                 return _this.isNew(filepath, relpath, function(state, isdir) {
-                  var ext, func;
                   if (isdir) {
                     _this.directory(filepath, relpath, currentState, function() {
                       return _onefile(index + 1);
@@ -220,17 +233,11 @@
                     _onefile(index + 1);
                     return;
                   }
-                  ext = path.extname(filepath);
-                  func = currentState.renderer[ext];
-                  if (func == null) {
-                    return _onefile(index + 1);
-                  } else {
-                    return func(_this, filepath, odir, currentState, function() {
-                      return process.nextTick(function() {
-                        return _onefile(index + 1);
-                      });
+                  return currentState.renderer(filepath, odir, currentState, function() {
+                    return process.nextTick(function() {
+                      return _onefile(index + 1);
                     });
-                  }
+                  });
                 });
               };
               return _onefile(0);
@@ -293,14 +300,13 @@
       })(this));
     };
 
-    Builder.prototype.renderFile = function(filepath, outdir, outname, currentState, local, callback) {
-      var dir, opt, outpath;
+    Builder.prototype.renderFile = function(filepath, outpath, currentState, local, callback) {
+      var dir, opt;
       if ((callback == null) && "function" === typeof local) {
         callback = local;
         local = {};
       }
       dir = path.dirname(filepath);
-      outpath = path.join(outdir, outname);
       opt = Object.create(local);
       opt.filename = filepath;
       opt.pretty = true;
