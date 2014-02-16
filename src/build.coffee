@@ -65,16 +65,17 @@ class Builder
         ###
         # frameRenderer: テンプレートの関数
         # renderer: レンダリングする関数
-        #
+        # defaultDependencies: デフォルトで依存する
         ###
-        currentState.renderer=(filepath,outdir,currentState,callback)=>
+        currentState.renderer=(filepath,currentState,callback)=>
             ext=path.extname filepath
             if ext==".jade"
                 res=path.basename filepath,".jade"
-                @renderFile filepath,path.join(outdir,res+@config.extension),currentState,callback
+                @renderFile filepath,res+@config.extension,currentState,callback
             else
                 # 何もしない
                 callback()
+        currentState.defaultDependencies=[]
         # 依存関係ファイルをチェックする
         dependpath=path.join sitedir,@config.dependencies_file
         # @dependencies
@@ -125,6 +126,8 @@ class Builder
                         throw e
                     finally
                         currentState=Object.create currentState
+                        currentState.dir=relativedir
+                        currentState.defaultDependencies=currentState.defaultDependencies.concat(path.join relativedir,@config.index_file)
                         if indexobj.template?
                             templatefile=path.join indir,indexobj.template
                             fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
@@ -147,9 +150,11 @@ class Builder
             # レンダラも読み込んだりして
             nextStep=(indexobj)=>
                 if indexobj?.renderer
-                    rendererfile=require path.join indir,indexobj.renderer
+                    rendererpath=path.join indir,indexobj.renderer
+                    rendererfile=require rendererpath
                     rendererobj=rendererfile.getRenderer this
                     currentState.renderer=rendererobj.render
+                    currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
                 do nextStep2
             # indexを読み終わったのでディレクトリを列挙する
             nextStep2= =>
@@ -167,6 +172,15 @@ class Builder
                         # 全ファイルを走査する!!!!!!!
                         filepath=path.join indir,filename
                         relpath=path.join relativedir,filename
+                        if relpath==@config.dependencies_file
+                            # これは走査する必要なし
+                            _onefile index+1
+                            return
+
+                        # 依存関係更新
+                        deps=@dependencies.depends[relpath] ? []
+                        @dependencies.depends[relpath]=unique deps.concat currentState.defaultDependencies
+                        # ユニーク以外は消す
                         @isNew filepath,relpath,(state,isdir)=>
                             if isdir
                                 # ディレクトリは中を走査する
@@ -177,10 +191,11 @@ class Builder
                                 # このファイルは新しくない
                                 _onefile index+1
                                 return
+                            console.log "processing #{relpath}"
 
                             # ファイルをアレする
                             # レンダリングする
-                            currentState.renderer filepath,odir,currentState,->
+                            currentState.renderer filepath,currentState,->
                                 process.nextTick ->
                                     _onefile index+1
                     _onefile 0
@@ -232,8 +247,9 @@ class Builder
             _check 0
 
 
+    # # # # 公開API的な何か
     # ひとつrenderする
-    renderFile:(filepath,outpath,currentState,local,callback)->
+    renderFile:(filepath,outname,currentState,local,callback)->
         if !callback? && "function"==typeof local
             callback=local
             local={}
@@ -241,6 +257,7 @@ class Builder
         opt=Object.create local
         opt.filename=filepath
         opt.pretty=true
+        outpath=path.join @outdir,currentState.dir,outname
 
         jade.renderFile filepath,opt,(err,html)=>
             if err?
@@ -262,10 +279,26 @@ class Builder
                     throw err
                 # 次へ
                 callback()
+    dependon:(frompath,topath)->
+        # 1回目の依存関係チェックはいらない?
+        frel=path.relative @sitedir,frompath
+        trel=path.relative @sitedir,topath
+        if Array.isArray @dependencies.depends[frel]
+            @dependencies.depends[frel]=unique @dependencies.depends[frel].concat trel
+        else
+            @dependencies.depends[frel]=[trel]
 
 
 
-
+#util
+unique=(arr)->
+    result=[]
+    table={}
+    for value in arr
+        unless table[value]?
+            table[value]=true
+            result.push value
+    result
 
 
 
