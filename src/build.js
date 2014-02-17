@@ -90,6 +90,7 @@
 
       /*
        * frameRenderer: テンプレートの関数
+       * middleRenderer: 間にはさむテンプレートの関数
        * renderer: レンダリングする関数
        * defaultDependencies: デフォルトで依存する
        */
@@ -105,6 +106,7 @@
           }
         };
       })(this);
+      currentState.middleRenderer = [];
       currentState.defaultDependencies = [];
       dependpath = path.join(sitedir, this.config.dependencies_file);
 
@@ -152,7 +154,7 @@
       odir = path.join(this.outdir, relativedir);
       return this.ensureDir(odir, (function(_this) {
         return function(err) {
-          var indexfile, nextStep, nextStep2;
+          var indexfile, nextStep, nextStep2, nextStep3;
           if (err != null) {
             throw err;
           }
@@ -181,6 +183,7 @@
                       console.error("Error processing " + indexfile);
                       throw err;
                     }
+                    currentState.defaultDependencies.push(path.join(relativedir, indexobj.template));
                     currentState.frameRenderer = jade.compile(data, {
                       filename: templatefile,
                       pretty: true,
@@ -199,6 +202,40 @@
             }
           });
           nextStep = function(indexobj) {
+            var mids, _onetemp;
+            if (indexobj["middle-template"] != null) {
+              mids = indexobj["middle-template"];
+              if (!Array.isArray(mids)) {
+                mids = [mids];
+              }
+              _onetemp = function(index) {
+                var templatefile;
+                if (index >= mids.length) {
+                  nextStep2(indexobj);
+                  return;
+                }
+                templatefile = path.join(indir, mids[index]);
+                return fs.readFile(templatefile, {
+                  encoding: _this.config.encoding
+                }, function(err, data) {
+                  if (err != null) {
+                    console.error("Error processing " + indexfile);
+                    throw err;
+                  }
+                  currentState.defaultDependencies.push(path.join(relativedir, mids[index]));
+                  currentState.middleRenderer.push(jade.compile(data, {
+                    filename: templatefile,
+                    pretty: true
+                  }));
+                  return _onetemp(index + 1);
+                });
+              };
+              return _onetemp(0);
+            } else {
+              return nextStep2(indexobj);
+            }
+          };
+          nextStep2 = function(indexobj) {
             var rendererfile, rendererobj, rendererpath;
             if (indexobj != null ? indexobj.renderer : void 0) {
               rendererpath = path.join(indir, indexobj.renderer);
@@ -207,9 +244,9 @@
               currentState.renderer = rendererobj.render;
               currentState.defaultDependencies = currentState.defaultDependencies.concat(path.relative(_this.sitedir, rendererpath));
             }
-            return nextStep2();
+            return nextStep3();
           };
-          return nextStep2 = function() {
+          return nextStep3 = function() {
             return fs.readdir(indir, function(err, files) {
               var index, _onefile;
               if (err) {
@@ -312,6 +349,25 @@
       })(this));
     };
 
+    Builder.prototype.keepFile = function(filepath, currentState, callback) {
+      var outpath, rs, ws;
+      outpath = path.join(this.outdir, path.basename(filepath));
+      rs = fs.createReadStream(filepath);
+      rs.on("error", function(err) {
+        console.error("Error copying " + filepath + " to " + outpath);
+        throw err;
+      });
+      ws = fs.createWriteStream(outpath);
+      ws.on("error", function(err) {
+        console.error("Error copying " + filepath + " to " + outpath);
+        throw err;
+      });
+      ws.on("close", function() {
+        return callback();
+      });
+      return rs.pipe(ws);
+    };
+
     Builder.prototype.renderFile = function(filepath, outname, currentState, local, callback) {
       var dir, opt, outpath;
       if ((callback == null) && "function" === typeof local) {
@@ -325,7 +381,7 @@
       outpath = path.join(this.outdir, currentState.dir, outname);
       return jade.renderFile(filepath, opt, (function(_this) {
         return function(err, html) {
-          var renderresult;
+          var content, frs, func, _i;
           if (err != null) {
             console.error("Error rendering " + filepath);
             throw err;
@@ -334,10 +390,15 @@
             console.error("Error processing " + filepath);
             throw new Error("No renderer is set.");
           }
-          renderresult = currentState.frameRenderer({
-            content: html
-          });
-          return fs.writeFile(outpath, renderresult, {
+          frs = [currentState.frameRenderer].concat(currentState.middleRenderer);
+          content = html;
+          for (_i = frs.length - 1; _i >= 0; _i += -1) {
+            func = frs[_i];
+            content = func({
+              content: content
+            });
+          }
+          return fs.writeFile(outpath, content, {
             encoding: _this.config.encoding
           }, function(err) {
             if (err != null) {

@@ -64,6 +64,7 @@ class Builder
         currentState={}
         ###
         # frameRenderer: テンプレートの関数
+        # middleRenderer: 間にはさむテンプレートの関数
         # renderer: レンダリングする関数
         # defaultDependencies: デフォルトで依存する
         ###
@@ -75,6 +76,7 @@ class Builder
             else
                 # 何もしない
                 callback()
+        currentState.middleRenderer=[]
         currentState.defaultDependencies=[]
         # 依存関係ファイルをチェックする
         dependpath=path.join sitedir,@config.dependencies_file
@@ -135,6 +137,7 @@ class Builder
                                     console.error "Error processing #{indexfile}"
                                     throw err
 
+                                currentState.defaultDependencies.push path.join relativedir,indexobj.template
                                 currentState.frameRenderer=jade.compile data,{
                                     filename:templatefile
                                     pretty:true
@@ -147,17 +150,42 @@ class Builder
                             nextStep indexobj
                 else
                     nextStep null
-            # レンダラも読み込んだりして
+            # middle-template読み込み
             nextStep=(indexobj)=>
+                if indexobj["middle-template"]?
+                    mids=indexobj["middle-template"]
+                    unless Array.isArray mids
+                        mids=[mids]
+                    _onetemp=(index)=>
+                        if index>=mids.length
+                            # 次へ
+                            nextStep2 indexobj
+                            return
+                        templatefile=path.join indir,mids[index]
+                        fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
+                            if err?
+                                console.error "Error processing #{indexfile}"
+                                throw err
+                            currentState.defaultDependencies.push path.join relativedir,mids[index]
+                            currentState.middleRenderer.push jade.compile data,{
+                                filename:templatefile
+                                pretty:true
+                            }
+                            _onetemp index+1
+                    _onetemp 0
+                else
+                    nextStep2 indexobj
+            # レンダラも読み込んだりして
+            nextStep2=(indexobj)=>
                 if indexobj?.renderer
                     rendererpath=path.join indir,indexobj.renderer
                     rendererfile=require rendererpath
                     rendererobj=rendererfile.getRenderer this
                     currentState.renderer=rendererobj.render
                     currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
-                do nextStep2
+                do nextStep3
             # indexを読み終わったのでディレクトリを列挙する
-            nextStep2= =>
+            nextStep3= =>
                 fs.readdir indir,(err,files)=>
                     if err
                         throw err
@@ -248,6 +276,20 @@ class Builder
 
 
     # # # # 公開API的な何か
+    # そのまま
+    keepFile:(filepath,currentState,callback)->
+        outpath=path.join @outdir,path.basename filepath
+        rs=fs.createReadStream filepath
+        rs.on "error",(err)->
+            console.error "Error copying #{filepath} to #{outpath}"
+            throw err
+        ws=fs.createWriteStream outpath
+        ws.on "error",(err)->
+            console.error "Error copying #{filepath} to #{outpath}"
+            throw err
+        ws.on "close",->
+            do callback
+        rs.pipe ws
     # ひとつrenderする
     renderFile:(filepath,outname,currentState,local,callback)->
         if !callback? && "function"==typeof local
@@ -267,11 +309,15 @@ class Builder
             if "function"!=typeof currentState?.frameRenderer
                 console.error "Error processing #{filepath}"
                 throw new Error "No renderer is set."
-            renderresult=currentState.frameRenderer {
-                content:html
-            }
+            frs=[currentState.frameRenderer].concat currentState.middleRenderer
+            #renderresult=currentState.frameRenderer {
+            #    content:html
+            #}
+            content=html
+            for func in frs by -1
+                content=func {content:content}
             # 書き込む
-            fs.writeFile outpath,renderresult,{
+            fs.writeFile outpath,content,{
                 encoding:@config.encoding
             },(err)->
                 if err?

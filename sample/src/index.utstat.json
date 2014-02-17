@@ -1,4 +1,5 @@
 {
 	"template":"../templates/main.jade",
+	"middle-template":"../templates/middle.jade",
 	"renderer":"renderer.js"
 }
