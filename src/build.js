@@ -154,7 +154,7 @@
       odir = path.join(this.outdir, relativedir);
       return this.ensureDir(odir, (function(_this) {
         return function(err) {
-          var indexfile, nextStep, nextStep2, nextStep3;
+          var indexfile, nextStep, nextStep2;
           if (err != null) {
             throw err;
           }
@@ -202,7 +202,21 @@
             }
           });
           nextStep = function(indexobj) {
-            var mids, _onetemp;
+            var mids, rendererfile, rendererobj, rendererpath, _onetemp;
+            if (indexobj != null ? indexobj.renderer : void 0) {
+              rendererpath = path.join(indir, indexobj.renderer);
+              rendererfile = require(rendererpath);
+              rendererobj = rendererfile.getRenderer(_this);
+              currentState.renderer = rendererobj.render;
+              currentState.defaultDependencies = currentState.defaultDependencies.concat(path.relative(_this.sitedir, rendererpath));
+              if ("function" === typeof rendererobj.afterRender) {
+                currentState.middleRenderer.push((function(func) {
+                  return function(obj) {
+                    return func(obj.content);
+                  };
+                })(rendererobj.afterRender));
+              }
+            }
             if (indexobj["middle-template"] != null) {
               mids = indexobj["middle-template"];
               if (!Array.isArray(mids)) {
@@ -235,18 +249,7 @@
               return nextStep2(indexobj);
             }
           };
-          nextStep2 = function(indexobj) {
-            var rendererfile, rendererobj, rendererpath;
-            if (indexobj != null ? indexobj.renderer : void 0) {
-              rendererpath = path.join(indir, indexobj.renderer);
-              rendererfile = require(rendererpath);
-              rendererobj = rendererfile.getRenderer(_this);
-              currentState.renderer = rendererobj.render;
-              currentState.defaultDependencies = currentState.defaultDependencies.concat(path.relative(_this.sitedir, rendererpath));
-            }
-            return nextStep3();
-          };
-          return nextStep3 = function() {
+          return nextStep2 = function() {
             return fs.readdir(indir, function(err, files) {
               var index, _onefile;
               if (err) {

@@ -150,8 +150,17 @@ class Builder
                             nextStep indexobj
                 else
                     nextStep null
-            # middle-template読み込み
             nextStep=(indexobj)=>
+                # レンダラ読み込み
+                if indexobj?.renderer
+                    rendererpath=path.join indir,indexobj.renderer
+                    rendererfile=require rendererpath
+                    rendererobj=rendererfile.getRenderer this
+                    currentState.renderer=rendererobj.render
+                    currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
+                    if "function"==typeof rendererobj.afterRender
+                        currentState.middleRenderer.push ((func)->(obj)->func obj.content)(rendererobj.afterRender)
+                # middle-template読み込み
                 if indexobj["middle-template"]?
                     mids=indexobj["middle-template"]
                     unless Array.isArray mids
@@ -175,17 +184,8 @@ class Builder
                     _onetemp 0
                 else
                     nextStep2 indexobj
-            # レンダラも読み込んだりして
-            nextStep2=(indexobj)=>
-                if indexobj?.renderer
-                    rendererpath=path.join indir,indexobj.renderer
-                    rendererfile=require rendererpath
-                    rendererobj=rendererfile.getRenderer this
-                    currentState.renderer=rendererobj.render
-                    currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
-                do nextStep3
             # indexを読み終わったのでディレクトリを列挙する
-            nextStep3= =>
+            nextStep2= =>
                 fs.readdir indir,(err,files)=>
                     if err
                         throw err

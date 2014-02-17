@@ -22,6 +22,9 @@ exports.getRenderer=function(builder){
 			}else{
 				callback();
 			}
-		}
+		},
+		afterRender:function(content){
+			return content.replace(/\[\[foo\]\]/g,"<a href='/foo'>foo</a>");
+		},
 	};
 };
