@@ -151,6 +151,10 @@
 
     Builder.prototype.directory = function(indir, relativedir, currentState, callback) {
       var odir;
+      if ((this.config.parseTop != null) && /(?:^|\/)\.\.(?:$|\/)/.test(path.relative(indir, this.config.parseTop))) {
+        callback();
+        return;
+      }
       odir = path.join(this.outdir, relativedir);
       return this.ensureDir(odir, (function(_this) {
         return function(err) {
@@ -212,7 +216,7 @@
               if ("function" === typeof rendererobj.afterRender) {
                 currentState.middleRenderer.push((function(func) {
                   return function(obj) {
-                    return func(obj.content);
+                    return func(obj.content, obj.page);
                   };
                 })(rendererobj.afterRender));
               }
@@ -284,7 +288,9 @@
                     _onefile(index + 1);
                     return;
                   }
-                  console.log("processing " + relpath);
+                  if (_this.config.log_level > 0) {
+                    console.log("processing " + relpath);
+                  }
                   return currentState.renderer(filepath, currentState, function() {
                     return process.nextTick(function() {
                       return _onefile(index + 1);
@@ -372,13 +378,15 @@
     };
 
     Builder.prototype.renderFile = function(filepath, outname, currentState, local, callback) {
-      var dir, opt, outpath;
+      var dir, opt, outpath, page;
       if ((callback == null) && "function" === typeof local) {
         callback = local;
         local = {};
       }
       dir = path.dirname(filepath);
+      page = {};
       opt = Object.create(local);
+      opt.page = page;
       opt.filename = filepath;
       opt.pretty = true;
       outpath = path.join(this.outdir, currentState.dir, outname);
@@ -398,7 +406,8 @@
           for (_i = frs.length - 1; _i >= 0; _i += -1) {
             func = frs[_i];
             content = func({
-              content: content
+              content: content,
+              page: page
             });
           }
           return fs.writeFile(outpath, content, {

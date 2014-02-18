@@ -113,6 +113,10 @@ class Builder
 
     # ディレクトリをビルドする
     directory:(indir,relativedir,currentState,callback)->
+        if @config.parseTop? && /(?:^|\/)\.\.(?:$|\/)/.test path.relative indir,@config.parseTop
+            # ここは方向が違う
+            do callback
+            return
         odir=path.join @outdir,relativedir
         @ensureDir odir,(err)=>
             if err?
@@ -159,7 +163,7 @@ class Builder
                     currentState.renderer=rendererobj.render
                     currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
                     if "function"==typeof rendererobj.afterRender
-                        currentState.middleRenderer.push ((func)->(obj)->func obj.content)(rendererobj.afterRender)
+                        currentState.middleRenderer.push ((func)->(obj)->func obj.content,obj.page)(rendererobj.afterRender)
                 # middle-template読み込み
                 if indexobj["middle-template"]?
                     mids=indexobj["middle-template"]
@@ -219,7 +223,8 @@ class Builder
                                 # このファイルは新しくない
                                 _onefile index+1
                                 return
-                            console.log "processing #{relpath}"
+                            if @config.log_level>0
+                                console.log "processing #{relpath}"
 
                             # ファイルをアレする
                             # レンダリングする
@@ -296,7 +301,11 @@ class Builder
             callback=local
             local={}
         dir=path.dirname filepath
+        # ページ情報
+        page={}
+
         opt=Object.create local
+        opt.page=page
         opt.filename=filepath
         opt.pretty=true
         outpath=path.join @outdir,currentState.dir,outname
@@ -315,7 +324,7 @@ class Builder
             #}
             content=html
             for func in frs by -1
-                content=func {content:content}
+                content=func {content:content,page:page}
             # 書き込む
             fs.writeFile outpath,content,{
                 encoding:@config.encoding

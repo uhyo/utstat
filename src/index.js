@@ -11,10 +11,19 @@
   Utstat = (function() {
     function Utstat() {}
 
-    Utstat.prototype.build = function(dir, callback) {
-      var builder;
+    Utstat.prototype.build = function(dir, option, callback) {
+      var builder, conf, key, value;
+      if ((callback == null) && "function" === typeof option) {
+        callback = option;
+        option = {};
+      }
+      conf = Object.create(config);
+      for (key in option) {
+        value = option[key];
+        conf[key] = value;
+      }
       dir = path.resolve(dir);
-      builder = new build.Builder(config, dir);
+      builder = new build.Builder(conf, dir);
       return builder.build(callback);
     };
 
