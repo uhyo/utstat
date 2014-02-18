@@ -1,12 +1,24 @@
 {
   "name":"utsite",
   "description":"Your website.",
-  "version":"0.0.1",
-  "author":"uhyo <uhyohyo@uhyohyohyo.sakura.ne.jp>",
+  "version":"0.1.0",
+  "author":{
+	  "name":"uhyo",
+	  "email":"uhyohyo@uhyohyohyo.sakura.ne.jp",
+	  "url":"http://uhyohyo.net/"
+  },
+  "bin":{
+	  "ustat":"./bin/utstat"
+  },
+  "repository":{
+	  "type":"git",
+	  "url":"https://github.com/uhyo/utstat"
+  },
   "private":false,
   "engines":{"node":">=0.10.0"},
   "dependencies":{
-    "jade":">=1.1"
+    "jade":">=1.1",
+	"minimist":">=0.0.7"
   }
 }
 

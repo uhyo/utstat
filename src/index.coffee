@@ -17,7 +17,5 @@ class Utstat
         builder.build callback
 
 
-
-
 # export
 module.exports=new Utstat
