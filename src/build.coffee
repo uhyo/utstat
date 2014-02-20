@@ -2,9 +2,60 @@ fs=require 'fs'
 path=require 'path'
 jade=require 'jade'
 
+# 現在の状態
+class State
+    ###
+    # frameRenderer: テンプレートの関数
+    # middleRenderer: 間にはさむテンプレートの関数
+    # renderer: レンダリングする関数
+    # defaultDependencies: デフォルトで依存する
+    # dir: 現在処理しているディレクトリ（相対パス）
+    ###
+    constructor:(@builder)->
+        @frameRenderer=null
+        @renderer=null
+        @middleRenderer=[]
+        @defaultDependencies=[]
+        @dir=null
+    # 新しいの
+    clone:->
+        res=new State @builder
+        res.frameRenderer=@frameRenderer
+        res.renderer=@renderer
+        res.middleRenderer=@middleRenderer.concat []
+        res.defaultDependencies=@defaultDependencies.concat []
+        res.dir=@dir
+        res
+    # 依存先ファイルを追加
+    # paths: (現在のディレクトリからの相対パス）
+    addDependency:(paths)->
+        unless Array.isArray paths
+            paths=[paths]
+        for p in paths
+            @defaultDependencies.push path.relative @builder.sitedir,path.resolve @builder.sitedir,@dir,p
+        return
+    # レンダー関数を追加
+    addMiddleRenderer:(func)->
+        @middleRenderer.push func
+        return
+    # 新しいjadeテンプレートを間に追加
+    addMiddleTemplate:(filepath,callback)->
+        templatefile=path.resolve @builder.sitedir,@dir,filepath
+        @builder.loadTemplate templatefile,(err,func)=>
+            if err?
+                callback err
+                return
+            @addDependency filepath
+            @addMiddleRenderer func
+            callback null
+        return
+
+
 class Builder
     #config: config.coffee
     constructor:(@config,@dir)->
+        # テンプレートのキャッシュ（ファイル名）
+        @templateCache={}
     # このディレクトリでビルドする
     build:(callback)->
         # site topを探す
@@ -54,6 +105,8 @@ class Builder
 
     # サイト情報をゲットして走査開始するぞ!!!!!!!!!!!!!!!!
     registerSite:(sitedir,siteobj)->
+        if @config.log_level>=2
+            console.log "stating from",sitedir
         @sitedir=sitedir
         @siteobj=siteobj
         output=siteobj.output
@@ -61,13 +114,7 @@ class Builder
             throw new Error "No output field."
         @outdir=path.resolve sitedir,output
         # 現在の状態を作る
-        currentState={}
-        ###
-        # frameRenderer: テンプレートの関数
-        # middleRenderer: 間にはさむテンプレートの関数
-        # renderer: レンダリングする関数
-        # defaultDependencies: デフォルトで依存する
-        ###
+        currentState=new State this
         currentState.renderer=(filepath,currentState,callback)=>
             ext=path.extname filepath
             if ext==".jade"
@@ -113,10 +160,12 @@ class Builder
 
     # ディレクトリをビルドする
     directory:(indir,relativedir,currentState,callback)->
-        if @config.parseTop? && /(?:^|\/)\.\.(?:$|\/)/.test path.relative indir,@config.parseTop
+        if @config.parseTop? && /(?:^|\/)\.\.(?:$|\/)/.test path.relative @config.parseTop,indir
             # ここは方向が違う
             do callback
             return
+        if @config.log_level>=2
+            console.log "entering directory",indir
         odir=path.join @outdir,relativedir
         @ensureDir odir,(err)=>
             if err?
@@ -131,9 +180,9 @@ class Builder
                         console.error "Error reading #{indexfile}"
                         throw e
                     finally
-                        currentState=Object.create currentState
+                        currentState=currentState.clone()
                         currentState.dir=relativedir
-                        currentState.defaultDependencies=currentState.defaultDependencies.concat(path.join relativedir,@config.index_file)
+                        currentState.addDependency @config.index_file
                         if indexobj.template?
                             templatefile=path.join indir,indexobj.template
                             fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
@@ -141,7 +190,7 @@ class Builder
                                     console.error "Error processing #{indexfile}"
                                     throw err
 
-                                currentState.defaultDependencies.push path.join relativedir,indexobj.template
+                                currentState.addDependency indexobj.template
                                 currentState.frameRenderer=jade.compile data,{
                                     filename:templatefile
                                     pretty:true
@@ -157,13 +206,50 @@ class Builder
             nextStep=(indexobj)=>
                 # レンダラ読み込み
                 if indexobj?.renderer
-                    rendererpath=path.join indir,indexobj.renderer
-                    rendererfile=require rendererpath
-                    rendererobj=rendererfile.getRenderer this
-                    currentState.renderer=rendererobj.render
-                    currentState.defaultDependencies=currentState.defaultDependencies.concat path.relative @sitedir,rendererpath
-                    if "function"==typeof rendererobj.afterRender
-                        currentState.middleRenderer.push ((func)->(obj)->func obj.content,obj.page)(rendererobj.afterRender)
+                    switch typeof indexobj.renderer
+                        when "string"
+                            # カスタムレンダラ（ファイル）
+                            rendererpath=path.join indir,indexobj.renderer
+                            rendererfile=require rendererpath
+                            rendererobj=rendererfile.getRenderer this
+                            if "function"==typeof rendererobj.render
+                                currentState.renderer=rendererobj.render
+
+                            currentState.addDependency indexobj.renderer
+
+                            if "function"==typeof rendererobj.afterRender
+                                currentState.addMiddleRenderer ((func)->(obj)->func obj.content,obj.page)(rendererobj.afterRender)
+                        when "object"
+                            # 簡易カスタム
+                            switch indexobj.renderer.type
+                                when "static"
+                                    # 拡張子によってそのままアレする
+                                    currentState.renderer=((exts,builder)->
+                                        (filepath,currentState,callback)->
+                                            ext=path.extname filepath
+                                            if exts=="*" || exts.indexOf(ext)>=0
+                                                # これはアレする
+                                                builder.keepFile filepath,currentState,callback
+                                            else
+                                                # 他は無視
+                                                do callback
+                                    )(indexobj.renderer.exts,this)
+                                when "jade"
+                                    # 普通にjadeをレンダリング
+                                    # コピペだけど......
+                                    currentState.renderer=(filepath,currentState,callback)=>
+                                        ext=path.extname filepath
+                                        if ext==".jade"
+                                            res=path.basename filepath,".jade"
+                                            @renderFile filepath,res+@config.extension,currentState,callback
+                                        else
+                                            # 何もしない
+                                            callback()
+                                when "none"
+                                    # このディレクトリはレンダリングしない
+                                    do callback
+                                    return
+
                 # middle-template読み込み
                 if indexobj["middle-template"]?
                     mids=indexobj["middle-template"]
@@ -174,16 +260,10 @@ class Builder
                             # 次へ
                             nextStep2 indexobj
                             return
-                        templatefile=path.join indir,mids[index]
-                        fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
+                        currentState.addMiddleTemplate mids[index],(err)->
                             if err?
                                 console.error "Error processing #{indexfile}"
                                 throw err
-                            currentState.defaultDependencies.push path.join relativedir,mids[index]
-                            currentState.middleRenderer.push jade.compile data,{
-                                filename:templatefile
-                                pretty:true
-                            }
                             _onetemp index+1
                     _onetemp 0
                 else
@@ -193,7 +273,6 @@ class Builder
                 fs.readdir indir,(err,files)=>
                     if err
                         throw err
-                    index=0
                     _onefile=(index)=>
                         if index>=files.length
                             # おわり
@@ -215,6 +294,7 @@ class Builder
                         # ユニーク以外は消す
                         @isNew filepath,relpath,(state,isdir)=>
                             if isdir
+                                delete @dependencies.depends[relpath]
                                 # ディレクトリは中を走査する
                                 @directory filepath,relpath,currentState,->
                                     _onefile index+1
@@ -278,12 +358,30 @@ class Builder
                     some ||= state
                     _check index+1
             _check 0
+    # 中間テンプレートを読み込んでキャッシュする
+    # templatefile: 絶対パス
+    loadTemplate:(templatefile,callback)->
+        if @templateCache[templatefile]?
+            callback null,@templateCache[templatefile]
+            return
+        fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
+            if err?
+                console.error "error reading #{templatefile}"
+                callback err,null
+                return
+            func=jade.compile data,{
+                filename:templatefile
+                pretty:true
+            }
+            @templateCache[templatefile]=func
+            callback null,func
+        return
 
 
     # # # # 公開API的な何か
     # そのまま
     keepFile:(filepath,currentState,callback)->
-        outpath=path.join @outdir,path.basename filepath
+        outpath=path.join @outdir,currentState.dir,path.basename filepath
         rs=fs.createReadStream filepath
         rs.on "error",(err)->
             console.error "Error copying #{filepath} to #{outpath}"
@@ -303,9 +401,12 @@ class Builder
         dir=path.dirname filepath
         # ページ情報
         page={}
+        site=
+            name:@siteobj["site-name"]
 
         opt=Object.create local
         opt.page=page
+        opt.site=site
         opt.filename=filepath
         opt.pretty=true
         outpath=path.join @outdir,currentState.dir,outname
@@ -324,7 +425,8 @@ class Builder
             #}
             content=html
             for func in frs by -1
-                content=func {content:content,page:page}
+                opt.content=content
+                content=func opt
             # 書き込む
             fs.writeFile outpath,content,{
                 encoding:@config.encoding

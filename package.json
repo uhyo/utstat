@@ -1,5 +1,5 @@
 {
-  "name":"utsite",
+  "name":"utstat",
   "description":"Your website.",
   "version":"0.1.0",
   "author":{
@@ -7,12 +7,10 @@
 	  "email":"uhyohyo@uhyohyohyo.sakura.ne.jp",
 	  "url":"http://uhyohyo.net/"
   },
-  "bin":{
-	  "ustat":"./bin/utstat"
-  },
+  "bin":"./bin/utstat.js",
   "repository":{
 	  "type":"git",
-	  "url":"https://github.com/uhyo/utstat"
+	  "url":"https://github.com/uhyo/utstat.js"
   },
   "private":false,
   "engines":{"node":">=0.10.0"},
