@@ -164,6 +164,8 @@
           if (ext === ".jade" || ext === ".ect") {
             res = path.basename(filepath, ext);
             return _this.renderFile(filepath, res + _this.config.extension, currentState, callback);
+          } else if (ext === ".html" || ext === ".htm") {
+            return _this.keepFile(filepath, currentState, callback);
           } else {
             return callback();
           }
@@ -303,6 +305,8 @@
                         if (ext === ".jade" || ext === ".ect") {
                           res = path.basename(filepath, ext);
                           return _this.renderFile(filepath, res + _this.config.extension, currentState, callback);
+                        } else if (ext === ".html" || ext === ".htm") {
+                          return _this.keepFile(filepath, currentState, callback);
                         } else {
                           return callback();
                         }

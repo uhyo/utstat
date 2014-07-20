@@ -121,6 +121,9 @@ class Builder
             if ext in [".jade",".ect"]
                 res=path.basename filepath,ext
                 @renderFile filepath,res+@config.extension,currentState,callback
+            else if ext in [".html",".htm"]
+                # そのまま
+                @keepFile filepath,currentState,callback
             else
                 # 何もしない
                 callback()
@@ -234,6 +237,9 @@ class Builder
                                         if ext in [".jade",".ect"]
                                             res=path.basename filepath,ext
                                             @renderFile filepath,res+@config.extension,currentState,callback
+                                        else if ext in [".html",".htm"]
+                                            # そのまま
+                                            @keepFile filepath,currentState,callback
                                         else
                                             # 何もしない
                                             callback()
