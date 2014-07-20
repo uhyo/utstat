@@ -1,6 +1,7 @@
 fs=require 'fs'
 path=require 'path'
 jade=require 'jade'
+ect=require 'ect'
 
 # 現在の状態
 class State
@@ -38,7 +39,7 @@ class State
     addMiddleRenderer:(func)->
         @middleRenderer.push func
         return
-    # 新しいjadeテンプレートを間に追加
+    # 新しいテンプレートを間に追加
     addMiddleTemplate:(filepath,callback)->
         templatefile=path.resolve @builder.sitedir,@dir,filepath
         @builder.loadTemplate templatefile,(err,func)=>
@@ -117,8 +118,8 @@ class Builder
         currentState=new State this
         currentState.renderer=(filepath,currentState,callback)=>
             ext=path.extname filepath
-            if ext==".jade"
-                res=path.basename filepath,".jade"
+            if ext in [".jade",".ect"]
+                res=path.basename filepath,ext
                 @renderFile filepath,res+@config.extension,currentState,callback
             else
                 # 何もしない
@@ -185,19 +186,9 @@ class Builder
                         currentState.addDependency @config.index_file
                         if indexobj.template?
                             templatefile=path.join indir,indexobj.template
-                            fs.readFile templatefile,{encoding:@config.encoding},(err,data)=>
-                                if err?
-                                    console.error "Error processing #{indexfile}"
-                                    throw err
-
+                            @loadTemplate templatefile,(err,func)=>
                                 currentState.addDependency indexobj.template
-                                currentState.frameRenderer=jade.compile data,{
-                                    filename:templatefile
-                                    pretty:true
-                                    self:false
-                                    debug:false
-                                    compileDebug:false
-                                }
+                                currentState.frameRenderer=func
                                 nextStep indexobj
                         else
                             nextStep indexobj
@@ -234,13 +225,14 @@ class Builder
                                                 # 他は無視
                                                 do callback
                                     )(indexobj.renderer.exts,this)
-                                when "jade"
-                                    # 普通にjadeをレンダリング
+                                when "normal","jade","ect"
+                                    # jadeとectは後方互換性
+                                    # 普通にテンプレートをレンダリング
                                     # コピペだけど......
                                     currentState.renderer=(filepath,currentState,callback)=>
                                         ext=path.extname filepath
-                                        if ext==".jade"
-                                            res=path.basename filepath,".jade"
+                                        if ext in [".jade",".ect"]
+                                            res=path.basename filepath,ext
                                             @renderFile filepath,res+@config.extension,currentState,callback
                                         else
                                             # 何もしない
@@ -369,10 +361,23 @@ class Builder
                 console.error "error reading #{templatefile}"
                 callback err,null
                 return
-            func=jade.compile data,{
-                filename:templatefile
-                pretty:true
-            }
+            #funcの引数: locals
+            ext=path.extname templatefile
+            if ext==".jade"
+                func=jade.compile data,{
+                    filename:templatefile
+                    pretty:true
+                    self:false
+                    debug:false
+                    compileDebug:false
+                }
+            else if ext==".ect"
+                func=((templatefile)->
+                    re=ect {
+                        root:path.dirname templatefile
+                    }
+                    return re.render.bind re,templatefile
+                )(templatefile)
             @templateCache[templatefile]=func
             callback null,func
         return
@@ -408,12 +413,15 @@ class Builder
         opt=Object.create local
         opt.page=page
         opt.site=site
+        # jade用
         opt.filename=filepath
         opt.pretty=true
         outpath=path.join @outdir,currentState.dir,outname
 
-        jade.renderFile filepath,opt,(err,html)=>
-            if err?
+        @loadTemplate filepath,(err,func)=>
+            try
+                html=func opt
+            catch err
                 console.error "Error rendering #{filepath}"
                 throw err
             # マスターに突っ込む

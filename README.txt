@@ -17,7 +17,7 @@ Make `index.utstat.json` at each directory. (see below)
 
 run `utstat` in the source directory. (or `utstat -h source-directory/`)
 
-Each `.jade` file will be converted to `.html` file.
+Each `.jade`,`.ect` file will be converted to `.html` file.
 
 ## index.utstat.json
 
