@@ -196,6 +196,7 @@ class Builder
                         else
                             nextStep indexobj
                 else
+                    console.warn "warn: Coundn't open #{indexfile}"
                     nextStep null
             nextStep=(indexobj)=>
                 # レンダラ読み込み
@@ -249,7 +250,7 @@ class Builder
                                     return
 
                 # middle-template読み込み
-                if indexobj["middle-template"]?
+                if indexobj?["middle-template"]?
                     mids=indexobj["middle-template"]
                     unless Array.isArray mids
                         mids=[mids]

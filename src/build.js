@@ -258,6 +258,7 @@
                 }
               }
             } else {
+              console.warn("warn: Coundn't open " + indexfile);
               return nextStep(null);
             }
           });
@@ -318,7 +319,7 @@
                   }
               }
             }
-            if (indexobj["middle-template"] != null) {
+            if ((indexobj != null ? indexobj["middle-template"] : void 0) != null) {
               mids = indexobj["middle-template"];
               if (!Array.isArray(mids)) {
                 mids = [mids];
