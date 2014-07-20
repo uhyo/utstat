@@ -501,7 +501,9 @@
         local = {};
       }
       dir = path.dirname(filepath);
-      page = {};
+      page = {
+        filepath: path.join(currentState.dir, path.basename(filepath))
+      };
       site = {
         name: this.siteobj["site-name"]
       };

@@ -400,7 +400,8 @@ class Builder
             local={}
         dir=path.dirname filepath
         # ページ情報
-        page={}
+        page=
+            filepath:path.join currentState.dir,path.basename filepath
         site=
             name:@siteobj["site-name"]
 
