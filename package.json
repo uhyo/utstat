@@ -19,6 +19,7 @@
   "dependencies": {
     "ect": "^0.5.9",
     "jade": ">=1.1",
+    "minimatch": "^0.4.0",
     "minimist": ">=0.0.7"
   }
 }

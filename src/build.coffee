@@ -2,6 +2,7 @@ fs=require 'fs'
 path=require 'path'
 jade=require 'jade'
 ect=require 'ect'
+minimatch=require 'minimatch'
 
 # 現在の状態
 class State
@@ -11,12 +12,14 @@ class State
     # renderer: レンダリングする関数
     # defaultDependencies: デフォルトで依存する
     # dir: 現在処理しているディレクトリ（相対パス）
+    # ignores: 無視する
     ###
     constructor:(@builder)->
         @frameRenderer=null
         @renderer=null
         @middleRenderer=[]
         @defaultDependencies=[]
+        @ignores=[]
         @dir=null
     # 新しいの
     clone:->
@@ -25,6 +28,7 @@ class State
         res.renderer=@renderer
         res.middleRenderer=@middleRenderer.concat []
         res.defaultDependencies=@defaultDependencies.concat []
+        res.ignores=@ignores.concat []
         res.dir=@dir
         res
     # 依存先ファイルを追加
@@ -50,6 +54,16 @@ class State
             @addMiddleRenderer func
             callback null
         return
+    # 無視するファイル
+    addIgnores:(patterns)->
+        unless Array.isArray patterns
+            patterns=[patterns]
+        for p in patterns
+            @ignores.push p
+        return
+    # 無視するか
+    matchIgnores:(path)->
+        @ignores.some (p)->minimatch path,p,{matchBase:true}
 
 
 class Builder
@@ -168,6 +182,7 @@ class Builder
             # ここは方向が違う
             do callback
             return
+
         if @config.log_level>=2
             console.log "entering directory",indir
         odir=path.join @outdir,relativedir
@@ -233,21 +248,26 @@ class Builder
                                     # jadeとectは後方互換性
                                     # 普通にテンプレートをレンダリング
                                     # コピペだけど......
-                                    currentState.renderer=(filepath,currentState,callback)=>
-                                        ext=path.extname filepath
-                                        if ext in [".jade",".ect"]
-                                            res=path.basename filepath,ext
-                                            @renderFile filepath,res+@config.extension,currentState,callback
-                                        else if ext in [".html",".htm"]
-                                            # そのまま
-                                            @keepFile filepath,currentState,callback
-                                        else
-                                            # 何もしない
-                                            callback()
+                                    currentState.renderer=((staticExts)=>
+                                        (filepath,currentState,callback)=>
+                                            ext=path.extname filepath
+                                            if ext in [".jade",".ect"]
+                                                res=path.basename filepath,ext
+                                                @renderFile filepath,res+@config.extension,currentState,callback
+                                            else if ext in staticExts
+                                                # そのまま
+                                                @keepFile filepath,currentState,callback
+                                            else
+                                                # 何もしない
+                                                callback()
+                                        )(indexobj.renderer.static ? [".html",".htm"])
                                 when "none"
                                     # このディレクトリはレンダリングしない
                                     do callback
                                     return
+                # ignores追加
+                if indexobj?.ignores?
+                    currentState.addIgnores indexobj.ignores
 
                 # middle-template読み込み
                 if indexobj?["middle-template"]?
@@ -284,6 +304,10 @@ class Builder
                         relpath=path.join relativedir,filename
                         if relpath==@config.dependencies_file
                             # これは走査する必要なし
+                            _onefile index+1
+                            return
+                        if currentState.matchIgnores relpath
+                            # これは無視
                             _onefile index+1
                             return
 
@@ -394,17 +418,23 @@ class Builder
     # そのまま
     keepFile:(filepath,currentState,callback)->
         outpath=path.join @outdir,currentState.dir,path.basename filepath
-        rs=fs.createReadStream filepath
-        rs.on "error",(err)->
-            console.error "Error copying #{filepath} to #{outpath}"
-            throw err
-        ws=fs.createWriteStream outpath
-        ws.on "error",(err)->
-            console.error "Error copying #{filepath} to #{outpath}"
-            throw err
-        ws.on "close",->
-            do callback
-        rs.pipe ws
+        fs.stat filepath,(err,stats)->
+            if err?
+                throw err
+            mode = stats.mode & parseInt("777",8)
+            rs=fs.createReadStream filepath
+            rs.on "error",(err)->
+                console.error "Error copying #{filepath} to #{outpath}"
+                throw err
+            ws=fs.createWriteStream outpath,{
+                mode:mode
+            }
+            ws.on "error",(err)->
+                console.error "Error copying #{filepath} to #{outpath}"
+                throw err
+            ws.on "close",->
+                do callback
+            rs.pipe ws
     # ひとつrenderする
     renderFile:(filepath,outname,currentState,local,callback)->
         if !callback? && "function"==typeof local
